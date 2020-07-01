@@ -40,6 +40,26 @@ class Executor(base_executor.BaseExecutor):
 
   This executor starts a AI Platform Training job with a flock of workers, where
   each worker independently executes Tuner's search loop on the single machine.
+
+  Per KerasTuner's design, distributed Tuner's identity is controlled by the
+  environment variable (KERATUNER_TUNER_ID) to each workers in the Cloud AI
+  Platform job. Those environment variables are configured in each worker
+  of Cloud AI Platform job's worker flock.
+
+  In addition, some implementation of KerasTuner requires a separate process
+  to centrally manage the state of tuning (called as 'chief oracle') which is
+  consulted by all workers according as another set of environment variables
+  (KERASTUNER_ORACLE_IP and KERASTUNER_ORACLE_PORT).
+
+  In summary, distributed tuning flock by Cloud AI Platform Job is structured
+  as follows.
+
+  Executor.Do() -> launch _Executor.Do() on a possibly multi-worker CAIP job ->
+
+    -+> master -> _search() (-> create a subprocess -> run the chief oracle.)
+     |                      +> trigger a single tuner.search()
+     +> worker -> _search() -> trigger a single tuner.search()
+     +> worker -> _search() -> trigger a single tuner.search()
   """
 
   # TODO(b/160013376): Refactor common parts with Trainer Executor.
@@ -212,9 +232,9 @@ class _Executor(base_executor.BaseExecutor):
                    os.environ['KERASTUNER_ORACLE_PORT'])
 
     # Conduct tuner search loop, regardless of master or worker.
+    os.environ['KERASTUNER_TUNER_ID'] = self._tuner_id
     logging.info('Setting KERASTUNER_TUNER_ID with %s',
                  os.environ['KERASTUNER_TUNER_ID'])
-    os.environ['KERASTUNER_TUNER_ID'] = self._tuner_id
 
     return tuner_executor.search(input_dict, exec_properties,
                                  _WORKING_DIRECTORY)
