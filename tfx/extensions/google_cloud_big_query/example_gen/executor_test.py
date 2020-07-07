@@ -24,18 +24,21 @@ import apache_beam as beam
 from apache_beam.testing import util
 import mock
 import tensorflow as tf
-from google.cloud import bigquery
-from google.protobuf import json_format
 from tfx.extensions.google_cloud_big_query.example_gen import executor
+from tfx.proto import bigquery_config_pb2
 from tfx.proto import example_gen_pb2
 from tfx.types import artifact_utils
 from tfx.types import standard_artifacts
+from google.cloud import bigquery
+from google.protobuf import json_format
 
 _test_project = 'test-project'
 
 
 @beam.ptransform_fn
-def _MockReadFromBigQuery(pipeline, query, project, use_bigquery_source):  # pylint: disable=invalid-name, unused-argument
+def _MockReadFromBigQuery(  # pylint: disable=invalid-name,unused-argument
+    pipeline, query, project, bigquery_job_labels, use_bigquery_source):
+  assert bigquery_job_labels['key'] == 'value'
   mock_query_results = []
   for i in range(10000):
     mock_query_result = {
@@ -48,7 +51,9 @@ def _MockReadFromBigQuery(pipeline, query, project, use_bigquery_source):  # pyl
 
 
 @beam.ptransform_fn
-def _MockReadFromBigQuery2(pipeline, query, project, use_bigquery_source):  # pylint: disable=invalid-name, unused-argument
+def _MockReadFromBigQuery2(  # pylint: disable=invalid-name,unused-argument
+    pipeline, query, project, bigquery_job_labels, use_bigquery_source):
+  assert bigquery_job_labels['key'] == 'value'
   mock_query_results = [{
       'i': 1,
       'i2': [2, 3],
@@ -64,6 +69,8 @@ def _MockReadFromBigQuery2(pipeline, query, project, use_bigquery_source):  # py
 class ExecutorTest(tf.test.TestCase):
 
   def setUp(self):
+    super(ExecutorTest, self).setUp()
+
     # Mock BigQuery result schema.
     self._schema = [
         bigquery.SchemaField('i', 'INTEGER', mode='REQUIRED'),
@@ -74,7 +81,13 @@ class ExecutorTest(tf.test.TestCase):
         bigquery.SchemaField('s', 'STRING', mode='REQUIRED'),
         bigquery.SchemaField('s2', 'STRING', mode='REPEATED'),
     ]
-    super(ExecutorTest, self).setUp()
+
+    bigquery_config = bigquery_config_pb2.BigQueryConfig()
+    json_format.ParseDict({'bigquery_job_labels': {
+        'key': 'value'
+    }}, bigquery_config)
+    self._packed_custom_config = example_gen_pb2.CustomConfig()
+    self._packed_custom_config.custom_config.Pack(bigquery_config)
 
   @mock.patch.multiple(
       executor,
@@ -90,6 +103,8 @@ class ExecutorTest(tf.test.TestCase):
           pipeline | 'ToTFExample' >> executor._BigQueryToExample(
               exec_properties={
                   '_beam_pipeline_args': ['--project=' + _test_project],
+                  'custom_config':
+                      json_format.MessageToJson(self._packed_custom_config),
               },
               split_pattern='SELECT i, i2, b, f, f2, s, s2 FROM `fake`'))
 
@@ -149,7 +164,9 @@ class ExecutorTest(tf.test.TestCase):
                         example_gen_pb2.SplitConfig.Split(
                             name='eval', hash_buckets=1)
                     ])),
-                preserving_proto_field_name=True)
+                preserving_proto_field_name=True),
+        'custom_config':
+            json_format.MessageToJson(self._packed_custom_config),
     }
 
     # Run executor.

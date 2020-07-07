@@ -21,10 +21,14 @@ from __future__ import print_function
 from typing import Any, Dict, Optional, Text
 
 import apache_beam as beam
+from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 import tensorflow as tf
 
-from google.cloud import bigquery
 from tfx.components.example_gen import base_example_gen_executor
+from tfx.proto import bigquery_config_pb2
+from tfx.proto import example_gen_pb2
+from google.cloud import bigquery
+from google.protobuf import json_format
 
 
 class _BigQueryConverter(object):
@@ -76,6 +80,7 @@ def _ReadFromBigQueryImpl(  # pylint: disable=invalid-name
     pipeline: beam.Pipeline,
     query: Text,
     project: Optional[Text],
+    bigquery_job_labels: Optional[Dict[Text, Text]],
     use_bigquery_source: bool = False) -> beam.pvalue.PCollection:
   """Read from BigQuery.
 
@@ -83,6 +88,9 @@ def _ReadFromBigQueryImpl(  # pylint: disable=invalid-name
     pipeline: beam pipeline.
     query: a BigQuery sql string.
     project: The ID of the project running this job.
+    bigquery_job_labels: A dictionary with string labels to be passed to
+      BigQuery export and query jobs created by this transform. See:
+      https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfiguration
     use_bigquery_source: Whether to use BigQuerySource instead of experimental
       `ReadFromBigQuery` PTransform.
 
@@ -95,15 +103,13 @@ def _ReadFromBigQueryImpl(  # pylint: disable=invalid-name
     return (pipeline
             | 'ReadFromBigQuerySource' >> beam.io.Read(
                 beam.io.BigQuerySource(query=query, use_standard_sql=True)))
-  # TODO(b/155441037): Change this to top level import after Beam version is
-  # upgraded to 2.22.
-  try:
-    from apache_beam.io.gcp.bigquery import ReadFromBigQuery  # pylint: disable=import-outside-toplevel,g-import-not-at-top
-  except ImportError:
-    from apache_beam.io.gcp.bigquery import _ReadFromBigQuery as ReadFromBigQuery  # pylint: disable=import-outside-toplevel,g-import-not-at-top
+
   return (pipeline
           | 'ReadFromBigQuery' >> ReadFromBigQuery(
-              query=query, use_standard_sql=True, project=project))
+              query=query,
+              use_standard_sql=True,
+              project=project,
+              bigquery_job_labels=bigquery_job_labels))
 
 
 @beam.ptransform_fn
@@ -136,10 +142,17 @@ def _BigQueryToExample(  # pylint: disable=invalid-name
       'dataflow', 'DataflowRunner'
   ]
 
+  custom_config = example_gen_pb2.CustomConfig()
+  json_format.Parse(exec_properties['custom_config'], custom_config)
+  bq_config = bigquery_config_pb2.BigQueryConfig()
+  custom_config.custom_config.Unpack(bq_config)
+  bigquery_job_labels = dict(bq_config.bigquery_job_labels) or None
+
   return (pipeline
           | 'QueryTable' >> _ReadFromBigQueryImpl(  # pylint: disable=no-value-for-parameter
               query=split_pattern,
               project=project,
+              bigquery_job_labels=bigquery_job_labels,
               use_bigquery_source=use_dataflow_runner)
           | 'ToTFExample' >> beam.Map(converter.RowToExample))
 

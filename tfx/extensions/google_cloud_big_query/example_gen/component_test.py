@@ -20,9 +20,11 @@ from __future__ import print_function
 
 import tensorflow as tf
 from tfx.extensions.google_cloud_big_query.example_gen import component
+from tfx.proto import bigquery_config_pb2
 from tfx.proto import example_gen_pb2
 from tfx.types import artifact_utils
 from tfx.types import standard_artifacts
+from google.protobuf import json_format
 
 
 class ComponentTest(tf.test.TestCase):
@@ -36,6 +38,13 @@ class ComponentTest(tf.test.TestCase):
     self.assertEqual(['train', 'eval'],
                      artifact_utils.decode_split_names(
                          artifact_collection[0].split_names))
+
+    custom_config = example_gen_pb2.CustomConfig()
+    json_format.Parse(big_query_example_gen.exec_properties['custom_config'],
+                      custom_config)
+    bq_config = bigquery_config_pb2.BigQueryConfig()
+    custom_config.custom_config.Unpack(bq_config)
+    self.assertEmpty(bq_config.bigquery_job_labels)
 
   def testConstructWithOutputConfig(self):
     big_query_example_gen = component.BigQueryExampleGen(
@@ -68,6 +77,17 @@ class ComponentTest(tf.test.TestCase):
     self.assertEqual(['train', 'eval', 'test'],
                      artifact_utils.decode_split_names(
                          artifact_collection[0].split_names))
+
+  def testConstructWithBigQueryJobLabels(self):
+    bigquery_job_labels = {'key': 'value'}
+    big_query_example_gen = component.BigQueryExampleGen(
+        query='query', bigquery_job_labels=bigquery_job_labels)
+    custom_config = example_gen_pb2.CustomConfig()
+    json_format.Parse(big_query_example_gen.exec_properties['custom_config'],
+                      custom_config)
+    bq_config = bigquery_config_pb2.BigQueryConfig()
+    custom_config.custom_config.Unpack(bq_config)
+    self.assertEqual(bigquery_job_labels, dict(bq_config.bigquery_job_labels))
 
 
 if __name__ == '__main__':

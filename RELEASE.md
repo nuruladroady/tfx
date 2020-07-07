@@ -12,6 +12,7 @@
     *   ImportExampleGen now supports `tf.train.SequenceExample` importing.
     *   base_example_gen_executor now supports `tf.train.SequenceExample` as
         output payload format, which can be utilized by custom ExampleGen.
+*   Supported labels specification for BigQueryExampleGen.
 
 ## Bug fixes and other changes
 *   Added Tuner component, which is still work in progress.

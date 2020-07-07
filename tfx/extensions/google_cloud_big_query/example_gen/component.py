@@ -18,14 +18,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from typing import Optional, Text
+from typing import Dict, Optional, Text
 
 from tfx import types
 from tfx.components.base import executor_spec
 from tfx.components.example_gen import component
 from tfx.components.example_gen import utils
 from tfx.extensions.google_cloud_big_query.example_gen import executor
+from tfx.proto import bigquery_config_pb2
 from tfx.proto import example_gen_pb2
+from google.protobuf import json_format
 
 
 class BigQueryExampleGen(component.QueryBasedExampleGen):  # pylint: disable=protected-access
@@ -41,6 +43,7 @@ class BigQueryExampleGen(component.QueryBasedExampleGen):  # pylint: disable=pro
                query: Optional[Text] = None,
                input_config: Optional[example_gen_pb2.Input] = None,
                output_config: Optional[example_gen_pb2.Output] = None,
+               bigquery_job_labels: Optional[Dict[Text, Text]] = None,
                example_artifacts: Optional[types.Channel] = None,
                instance_name: Optional[Text] = None):
     """Constructs a BigQueryExampleGen component.
@@ -58,6 +61,9 @@ class BigQueryExampleGen(component.QueryBasedExampleGen):  # pylint: disable=pro
         size 2:1. If any field is provided as a RuntimeParameter,
         input_config should be constructed as a dict with the same field names
         as Output proto message.
+      bigquery_job_labels: A dictionary with string labels to be passed to
+        BigQuery export and query jobs created by this transform. See:
+        https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfiguration
       example_artifacts: Optional channel of 'ExamplesPath' for output train and
         eval examples.
       instance_name: Optional unique instance name. Necessary if multiple
@@ -69,8 +75,16 @@ class BigQueryExampleGen(component.QueryBasedExampleGen):  # pylint: disable=pro
     if bool(query) == bool(input_config):
       raise RuntimeError('Exactly one of query and input_config should be set.')
     input_config = input_config or utils.make_default_input_config(query)
+
+    bigquery_config = bigquery_config_pb2.BigQueryConfig()
+    json_format.ParseDict({'bigquery_job_labels': bigquery_job_labels},
+                          bigquery_config)
+    packed_custom_config = example_gen_pb2.CustomConfig()
+    packed_custom_config.custom_config.Pack(bigquery_config)
+
     super(BigQueryExampleGen, self).__init__(
         input_config=input_config,
         output_config=output_config,
+        custom_config=packed_custom_config,
         example_artifacts=example_artifacts,
         instance_name=instance_name)
